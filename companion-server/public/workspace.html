@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Open with Ollama — Workspace</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0d1117; color: #c9d1d9;
+  }
+  header {
+    padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; color: #e6edf3; }
+  header .meta { font-size: 12px; color: #8b949e; }
+  header button, header input {
+    font-size: 12px; background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  }
+  header input { cursor: text; width: 160px; }
+  header button:hover { background: #30363d; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #tree { width: 260px; overflow-y: auto; border-right: 1px solid #30363d; padding: 10px; font-size: 13px; }
+  #tree ul { list-style: none; margin: 0; padding-left: 14px; }
+  #tree li { cursor: pointer; padding: 2px 0; white-space: nowrap; }
+  #tree li.file:hover { color: #58a6ff; }
+  #content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #viewer {
+    flex: 1; overflow: auto; padding: 12px; font-family: ui-monospace, Menlo, monospace;
+    font-size: 12.5px; white-space: pre-wrap; border-bottom: 1px solid #30363d;
+  }
+  #chatLog { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 8px 10px; border-radius: 8px; max-width: 90%; white-space: pre-wrap; font-size: 13px; }
+  .msg.user { align-self: flex-end; background: #1f6feb33; border: 1px solid #1f6feb66; }
+  .msg.assistant { align-self: flex-start; background: #21262d; border: 1px solid #30363d; }
+  .msg.system { align-self: center; color: #8b949e; font-size: 12px; }
+  #chatBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #30363d; }
+  #chatBar textarea {
+    flex: 1; resize: none; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 6px; padding: 8px; font-family: inherit; font-size: 13px; height: 44px;
+  }
+  #chatBar button {
+    background: #238636; color: white; border: none; border-radius: 6px; padding: 0 16px; cursor: pointer;
+  }
+  #chatBar button:disabled { background: #30363d; cursor: default; }
+  #split { display: flex; flex-direction: column; flex: 1; min-width: 0; border-right: 1px solid #30363d; }
+  .tab { color: #8b949e; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Open with Ollama</h1>
+  <span class="meta" id="repoLabel">loading…</span>
+  <input id="modelInput" placeholder="model (e.g. qwen2.5-coder:7b)" />
+  <button id="commitBtn">Commit</button>
+  <button id="pushBtn">Push</button>
+</header>
+<main>
+  <div id="tree"></div>
+  <div id="split">
+    <div id="viewer">Select a file to view it here.</div>
+  </div>
+  <div id="content">
+    <div id="chatLog"></div>
+    <div id="chatBar">
+      <textarea id="chatInput" placeholder="Ask the local model to explain or change something in this repo…"></textarea>
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const repo = params.get("repo");
+const repoLabel = document.getElementById("repoLabel");
+const treeEl = document.getElementById("tree");
+const viewerEl = document.getElementById("viewer");
+const chatLog = document.getElementById("chatLog");
+const chatInput = document.getElementById("chatInput");
+const sendBtn = document.getElementById("sendBtn");
+const modelInput = document.getElementById("modelInput");
+const commitBtn = document.getElementById("commitBtn");
+const pushBtn = document.getElementById("pushBtn");
+
+function addMsg(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function loadMeta() {
+  const res = await fetch(`/api/meta?repo=${encodeURIComponent(repo)}`);
+  const meta = await res.json();
+  repoLabel.textContent = `${meta.owner}/${meta.repo}${meta.branch ? " @ " + meta.branch : ""}${meta.subpath ? " / " + meta.subpath : ""}`;
+}
+
+function renderTree(nodes, container) {
+  const ul = document.createElement("ul");
+  for (const node of nodes) {
+    const li = document.createElement("li");
+    if (node.type === "dir") {
+      li.textContent = "📁 " + node.path.split("/").pop();
+      li.className = "dir";
+      renderTree(node.children, li);
+    } else {
+      li.textContent = "📄 " + node.path.split("/").pop();
+      li.className = "file";
+      li.addEventListener("click", () => openFile(node.path));
+    }
+    ul.appendChild(li);
+  }
+  container.appendChild(ul);
+}
+
+async function loadTree() {
+  const res = await fetch(`/api/tree?repo=${encodeURIComponent(repo)}`);
+  const data = await res.json();
+  treeEl.innerHTML = "";
+  renderTree(data.tree, treeEl);
+}
+
+async function openFile(filePath) {
+  const res = await fetch(`/api/file?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(filePath)}`);
+  const data = await res.json();
+  viewerEl.textContent = data.content ?? data.error;
+}
+
+async function sendMessage() {
+  const message = chatInput.value.trim();
+  if (!message) return;
+  addMsg("user", message);
+  chatInput.value = "";
+  sendBtn.disabled = true;
+  addMsg("system", "Thinking…");
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo, message, model: modelInput.value.trim() || undefined }),
+    });
+    const data = await res.json();
+    chatLog.lastChild.remove();
+    if (!res.ok) throw new Error(data.error);
+    addMsg("assistant", data.reply);
+    if (data.appliedFiles && data.appliedFiles.length) {
+      addMsg("system", "Updated: " + data.appliedFiles.join(", "));
+      loadTree();
+    }
+  } catch (err) {
+    chatLog.lastChild && chatLog.lastChild.className === "msg system" && chatLog.lastChild.remove();
+    addMsg("system", "Error: " + err.message);
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+sendBtn.addEventListener("click", sendMessage);
+chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+commitBtn.addEventListener("click", async () => {
+  const message = prompt("Commit message:", "Edits via Open with Ollama");
+  if (message === null) return;
+  const res = await fetch("/api/git/commit", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo, message }),
+  });
+  const data = await res.json();
+  addMsg("system", res.ok ? "Committed." : "Commit error: " + data.error);
+});
+
+pushBtn.addEventListener("click", async () => {
+  const res = await fetch("/api/git/push", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo }),
+  });
+  const data = await res.json();
+  addMsg("system", res.ok ? `Pushed to ${data.branch}.` : "Push error: " + data.error);
+});
+
+loadMeta();
+loadTree();
+</script>
+</body>
+</html>

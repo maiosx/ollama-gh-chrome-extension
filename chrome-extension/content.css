@@ -1,0 +1,24 @@
+.owo-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  background: #24292f;
+  color: #fff;
+  border: 1px solid #444c56;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 8px 24px rgba(140, 149, 159, 0.3);
+  max-width: 320px;
+  line-height: 1.4;
+}
+.owo-toast.owo-error {
+  background: #4c1f24;
+  border-color: #86181d;
+}
+.owo-toast.owo-success {
+  background: #122e1f;
+  border-color: #2ea043;
+}
