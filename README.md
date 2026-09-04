@@ -66,3 +66,5 @@ A toast in the corner confirms the clone; a new tab opens with the file tree and
   a copy next to it, since GitHub doesn't expose a documented extension point for that
   dropdown. If GitHub changes that menu's wording, the injection may need a tweak in
   `content.js`.
+Made with Claude
+https://claude.ai/share/d387d18f-2ccb-4893-8077-a968a3143881
