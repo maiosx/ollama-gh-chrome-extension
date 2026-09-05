@@ -135,6 +135,28 @@ app.get("/api/file", async (req, res) => {
   }
 });
 
+app.post("/api/file", async (req, res) => {
+  try {
+    const { repo, path: relPath, content } = req.body || {};
+    if (!relPath) return res.status(400).json({ error: "path is required" });
+    if (typeof content !== "string") return res.status(400).json({ error: "content must be a string" });
+    const dir = workspacePath(repo);
+    const filePath = safeJoin(dir, relPath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, content);
+
+    // Report back what git actually sees, same as after a chat-driven edit,
+    // so the UI can confirm the save is a real, committable change.
+    const git = simpleGit(dir);
+    const status = await git.status();
+    const gitChangedFiles = [...status.not_added, ...status.modified, ...status.created];
+
+    res.json({ saved: true, path: relPath, gitChangedFiles });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- Chat with local Ollama, applying any file edits it proposes ----------
 
 function flattenFiles(tree, out = []) {
@@ -163,6 +185,30 @@ function parseFileEdits(text) {
   let m;
   while ((m = re.exec(text))) {
     edits.push({ path: m[1].trim().replace(/^`+|`+$/g, ""), content: m[2] });
+  }
+  return edits;
+}
+
+// Fallback for when the model ignores the <<<FILE>>> format entirely and
+// falls back to its trained style instead: a filename mentioned just above a
+// plain markdown code fence, e.g.
+//   ### src/app.py
+//   ```python
+//   ...
+//   ```
+// or `path/to/file.js`: / **path/to/file.js** followed by a fence. Small
+// coding models do this far more often than the custom tag format, so this
+// is what actually catches most real-world replies.
+function parseFallbackEdits(text) {
+  const edits = [];
+  const re =
+    /(?:^|\n)[ \t]*(?:#{1,6}\s*|\*\*|`)?([A-Za-z0-9_][\w./-]*\.[A-Za-z0-9]{1,10})(?:\*\*|`)?:?[ \t]*\r?\n+```[a-zA-Z0-9+#_-]*\r?\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const p = m[1].trim();
+    // Skip obvious false positives: bare version numbers, URLs, etc.
+    if (/^https?:/i.test(p) || /^v?\d+\.\d+/.test(p)) continue;
+    edits.push({ path: p, content: m[2] });
   }
   return edits;
 }
@@ -238,9 +284,16 @@ app.post("/api/chat", async (req, res) => {
     const truncated = data.done_reason === "length" || looksTruncated(reply);
 
     const edits = parseFileEdits(reply);
+    let usedFallback = false;
+    let finalEdits = edits;
+    if (edits.length === 0) {
+      finalEdits = parseFallbackEdits(reply);
+      usedFallback = finalEdits.length > 0;
+    }
+
     const applied = [];
     const writeErrors = [];
-    for (const edit of edits) {
+    for (const edit of finalEdits) {
       try {
         const filePath = safeJoin(dir, edit.path);
         await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -257,7 +310,7 @@ app.post("/api/chat", async (req, res) => {
     const status = await git.status();
     const gitChangedFiles = [...status.not_added, ...status.modified, ...status.created];
 
-    res.json({ reply, appliedFiles: applied, writeErrors, truncated, gitChangedFiles });
+    res.json({ reply, appliedFiles: applied, writeErrors, truncated, gitChangedFiles, usedFallback });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
