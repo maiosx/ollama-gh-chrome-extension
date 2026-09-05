@@ -27,9 +27,7 @@ ollama pull qwen2.5-coder:7b
 Then:
 
 ```bash
-cd companion-server
-npm install
-node server.js
+cd companion-server && npm install && node server.js
 ```
 
 It listens on `http://localhost:8765` and talks to Ollama on `http://localhost:11434`
